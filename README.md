@@ -7,7 +7,7 @@ Because of this Neat will from now on only support two Minecraft Versions simult
 I will choose the LTS version myself based on what feels like the currently most popular version.
 The two supported versions are currently:
 - LTS: 1.21.1
-- Newest: 1.21.10 (currently wip)
+- Newest: 26.1 (currently wip)
 
 ## Release Process
 Neat's release process is mostly automated. Here's the steps:
