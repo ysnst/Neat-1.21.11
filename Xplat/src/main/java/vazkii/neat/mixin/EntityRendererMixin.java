@@ -2,8 +2,10 @@ package vazkii.neat.mixin;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 
-import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.entity.EntityRenderer;
+import net.minecraft.client.renderer.entity.state.EntityRenderState;
+import net.minecraft.client.renderer.state.CameraRenderState;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
@@ -21,8 +23,12 @@ import vazkii.neat.NeatConfig;
 @Mixin(EntityRenderer.class)
 public class EntityRendererMixin {
 
-	@Inject(method = "render(Lnet/minecraft/world/entity/Entity;FFLcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource;I)V", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/entity/EntityRenderer;renderNameTag(Lnet/minecraft/world/entity/Entity;Lnet/minecraft/network/chat/Component;Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource;IF)V"), cancellable = true)
-	private void neat_disableNameTag(Entity entity, float $$1, float $$2, PoseStack $$3, MultiBufferSource $$4, int $$5, CallbackInfo ci) {
+	@Inject(method = "submitNameTag", at = @At("HEAD"), cancellable = true)
+	private void neat_disableNameTag(EntityRenderState renderState, PoseStack poseStack, SubmitNodeCollector buffers, CameraRenderState cameraRenderState, CallbackInfo ci) {
+		Entity entity = HealthBarRenderer.getEntity(renderState);
+		if (entity == null) {
+			return;
+		}
 		NeatConfig.NameTagRenderBehavior renderBehavior = NeatConfig.instance.nameTagRenderBehavior();
 		if (renderBehavior != NeatConfig.NameTagRenderBehavior.ALWAYS &&
 				(renderBehavior == NeatConfig.NameTagRenderBehavior.WHEN_NO_HEALTHBAR && neat$entityHasHealthbar(entity)) ||

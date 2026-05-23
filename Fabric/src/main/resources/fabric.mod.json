@@ -40,9 +40,9 @@
   "accessWidener": "neat.accesswidener",
 
   "depends": {
-    "fabricloader": ">=0.15.11",
-    "cloth-config": ">=15.0.140",
-    "fabric": ">=0.100",
-    "minecraft": ">=1.21"
+    "fabricloader": ">=0.18.4",
+    "cloth-config": ">=21.11.153",
+    "fabric": ">=0.141.3",
+    "minecraft": ">=1.21.11"
   }
 }
