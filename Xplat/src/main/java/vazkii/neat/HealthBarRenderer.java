@@ -2,23 +2,28 @@ package vazkii.neat;
 
 import com.mojang.blaze3d.vertex.*;
 import com.mojang.math.Axis;
+import com.mojang.logging.LogUtils;
 
 import net.minecraft.ChatFormatting;
-import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
-import net.minecraft.client.renderer.MultiBufferSource;
-import net.minecraft.client.renderer.entity.EntityRenderer;
+import net.minecraft.client.renderer.LightTexture;
+import net.minecraft.client.renderer.SubmitNodeCollector;
+import net.minecraft.client.renderer.entity.state.EntityRenderState;
+import net.minecraft.client.renderer.item.ItemStackRenderState;
+import net.minecraft.client.renderer.state.CameraRenderState;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 import net.minecraft.tags.EntityTypeTags;
 import net.minecraft.tags.TagKey;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityAttachment;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemDisplayContext;
@@ -31,10 +36,26 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.scores.Team;
 
+import org.slf4j.Logger;
+
 import java.text.DecimalFormat;
 import java.util.*;
 
 public class HealthBarRenderer {
+	private static final Logger LOGGER = LogUtils.getLogger();
+	private static final int DEBUG_TEXT_COLOR = 0xffffffff;
+	private static final int DEBUG_TEXT_BACKGROUND = 0;
+	private static int textDebugLogs;
+
+	private static final Map<EntityRenderState, Entity> RENDER_STATE_ENTITIES = new WeakHashMap<>();
+
+	public static void registerRenderState(EntityRenderState renderState, Entity entity) {
+		RENDER_STATE_ENTITIES.put(renderState, entity);
+	}
+
+	public static Entity getEntity(EntityRenderState renderState) {
+		return RENDER_STATE_ENTITIES.get(renderState);
+	}
 
 	private static Entity getEntityLookedAt(Entity e) {
 		Entity foundEntity = null;
@@ -55,7 +76,7 @@ public class HealthBarRenderer {
 		for (Entity entity : entitiesInBoundingBox) {
 			Entity lookedEntity = null;
 			if (entity.isPickable()) {
-				AABB collisionBox = entity.getBoundingBoxForCulling();
+				AABB collisionBox = entity.getBoundingBox();
 				Optional<Vec3> interceptPosition = collisionBox.clip(positionVector, reachVector);
 
 				if (collisionBox.contains(positionVector)) {
@@ -126,7 +147,7 @@ public class HealthBarRenderer {
 	}
 
 	private static final TagKey<EntityType<?>> BOSS_TAG =
-			TagKey.create(Registries.ENTITY_TYPE, ResourceLocation.fromNamespaceAndPath("c", "bosses"));
+			TagKey.create(Registries.ENTITY_TYPE, Identifier.fromNamespaceAndPath("c", "bosses"));
 
 	public static boolean isBoss(Entity entity) {
 		return entity.getType().is(BOSS_TAG);
@@ -179,12 +200,14 @@ public class HealthBarRenderer {
 		if (cameraEntity instanceof Player cameraPlayer
 				&& living.isInvisibleTo(cameraPlayer)) {
 			boolean wearingThings = false;
-			for (ItemStack armorSlot : living.getArmorSlots()) {
+			for (EquipmentSlot slot : List.of(EquipmentSlot.FEET, EquipmentSlot.LEGS, EquipmentSlot.CHEST, EquipmentSlot.HEAD, EquipmentSlot.BODY)) {
+				ItemStack armorSlot = living.getItemBySlot(slot);
 				if (!armorSlot.isEmpty()) {
 					wearingThings = true;
 				}
 			}
-			for (ItemStack handSlot : living.getHandSlots()) {
+			for (EquipmentSlot slot : List.of(EquipmentSlot.MAINHAND, EquipmentSlot.OFFHAND)) {
+				ItemStack handSlot = living.getItemBySlot(slot);
 				if (!handSlot.isEmpty()) {
 					wearingThings = true;
 				}
@@ -207,15 +230,14 @@ public class HealthBarRenderer {
 		return visible;
 	}
 
-	public static void hookRender(Entity entity, PoseStack poseStack, MultiBufferSource buffers,
-			Camera camera, EntityRenderer<? super Entity> entityRenderer,
-			float partialTicks, double x, double y, double z) {
+	public static void hookRender(Entity entity, EntityRenderState renderState, PoseStack poseStack, SubmitNodeCollector buffers,
+			CameraRenderState cameraRenderState, double x, double y, double z) {
 		final Minecraft mc = Minecraft.getInstance();
 		if (!(entity instanceof LivingEntity living)) {
 			return;
 		}
 		//This was previously mc.gameRenderer.getMainCamera().getEntity() but that caused an incompatibility with RealCamera
-		if (!shouldShowPlate(living, camera.getEntity())) {
+		if (!shouldShowPlate(living, mc.getEntityRenderDispatcher().camera.entity())) {
 			return;
 		}
 
@@ -231,17 +253,19 @@ public class HealthBarRenderer {
 		final float nameLen = mc.font.width(name) * textScale;
 		final float halfSize = Math.max(NeatConfig.instance.plateSize(), nameLen / 2.0F + 10.0F);
 
-		Vec3 vec3 = entityRenderer.getRenderOffset(entity, partialTicks);
+		Vec3 vec3 = new Vec3(0, 0, 0);
 		double d2 = x + vec3.x();
 		double d3 = y + vec3.y();
 		double d0 = z + vec3.z();
 
-		Vec3 attachmentPoint = entity.getAttachments().get(EntityAttachment.NAME_TAG, 0, entity.getViewYRot(partialTicks));
+		Vec3 attachmentPoint = renderState.nameTagAttachment != null
+				? renderState.nameTagAttachment
+				: entity.getAttachments().get(EntityAttachment.NAME_TAG, 0, entity.getViewYRot(mc.getDeltaTracker().getGameTimeDeltaPartialTick(false)));
 
 		poseStack.pushPose();
 		poseStack.translate(d2, d3, d0);
 		poseStack.translate(attachmentPoint.x, attachmentPoint.y + NeatConfig.instance.heightAbove(), attachmentPoint.z);
-		poseStack.mulPose(camera.rotation());
+		poseStack.mulPose(mc.getEntityRenderDispatcher().camera.rotation());
 		poseStack.mulPose(Axis.YP.rotationDegrees(180));
 
 		// Plate background, bars, and text operate with globalScale, but icons don't
@@ -255,11 +279,7 @@ public class HealthBarRenderer {
 			if (!NeatConfig.instance.showEntityName()) {
 				bgHeight -= (int) 4F;
 			}
-			VertexConsumer builder = buffers.getBuffer(NeatRenderType.BAR_TEXTURE_TYPE);
-			builder.addVertex(poseStack.last().pose(), -halfSize - padding, -bgHeight, 0.01F).setColor(0, 0, 0, 60).setUv(0.0F, 0.0F).setLight(light);
-			builder.addVertex(poseStack.last().pose(), -halfSize - padding, barHeight + padding, 0.01F).setColor(0, 0, 0, 60).setUv(0.0F, 0.5F).setLight(light);
-			builder.addVertex(poseStack.last().pose(), halfSize + padding, barHeight + padding, 0.01F).setColor(0, 0, 0, 60).setUv(1.0F, 0.5F).setLight(light);
-			builder.addVertex(poseStack.last().pose(), halfSize + padding, -bgHeight, 0.01F).setColor(0, 0, 0, 60).setUv(1.0F, 0.0F).setLight(light);
+			submitQuad(buffers, poseStack, -halfSize - padding, -bgHeight, halfSize + padding, barHeight + padding, 0.01F, 0, 0, 0, 60, 0.0F, 0.0F, 1.0F, 0.5F, light);
 		}
 
 		// Health Bar
@@ -273,25 +293,17 @@ public class HealthBarRenderer {
 			float maxHealth = Math.max(living.getHealth(), living.getMaxHealth());
 			float healthHalfSize = halfSize * (living.getHealth() / maxHealth);
 
-			VertexConsumer builder = buffers.getBuffer(NeatRenderType.BAR_TEXTURE_TYPE);
-			builder.addVertex(poseStack.last().pose(), -halfSize, 0, 0.001F).setColor(r, g, b, 127).setUv(0.0F, 0.75F).setLight(light);
-			builder.addVertex(poseStack.last().pose(), -halfSize, barHeight, 0.001F).setColor(r, g, b, 127).setUv(0.0F, 1.0F).setLight(light);
-			builder.addVertex(poseStack.last().pose(), -halfSize + 2 * healthHalfSize, barHeight, 0.001F).setColor(r, g, b, 127).setUv(1.0F, 1.0F).setLight(light);
-			builder.addVertex(poseStack.last().pose(), -halfSize + 2 * healthHalfSize, 0, 0.001F).setColor(r, g, b, 127).setUv(1.0F, 0.75F).setLight(light);
+			submitQuad(buffers, poseStack, -halfSize, 0, -halfSize + 2 * healthHalfSize, barHeight, 0.001F, r, g, b, 127, 0.0F, 0.75F, 1.0F, 1.0F, light);
 
 			// Blank part of the bar
 			if (healthHalfSize < halfSize) {
-				builder.addVertex(poseStack.last().pose(), -halfSize + 2 * healthHalfSize, 0, 0.001F).setColor(0, 0, 0, 127).setUv(0.0F, 0.5F).setLight(light);
-				builder.addVertex(poseStack.last().pose(), -halfSize + 2 * healthHalfSize, barHeight, 0.001F).setColor(0, 0, 0, 127).setUv(0.0F, 0.75F).setLight(light);
-				builder.addVertex(poseStack.last().pose(), halfSize, barHeight, 0.001F).setColor(0, 0, 0, 127).setUv(1.0F, 0.75F).setLight(light);
-				builder.addVertex(poseStack.last().pose(), halfSize, 0, 0.001F).setColor(0, 0, 0, 127).setUv(1.0F, 0.5F).setLight(light);
+				submitQuad(buffers, poseStack, -halfSize + 2 * healthHalfSize, 0, halfSize, barHeight, 0.001F, 0, 0, 0, 127, 0.0F, 0.5F, 1.0F, 0.75F, light);
 			}
 		}
 
 		// Text
 		{
-			final int textColor = HexFormat.fromHexDigits(NeatConfig.instance.textColor());
-			final int black = 0;
+			final int configuredTextColor = 0xff000000 | HexFormat.fromHexDigits(NeatConfig.instance.textColor());
 
 			// Name
 			{
@@ -299,7 +311,7 @@ public class HealthBarRenderer {
 					poseStack.pushPose();
 					poseStack.translate(-halfSize, -4.5F, 0F);
 					poseStack.scale(textScale, textScale, textScale);
-					mc.font.drawInBatch(name, 0, 0, textColor, false, poseStack.last().pose(), buffers, Font.DisplayMode.NORMAL, black, light);
+					submitNeatText(buffers, poseStack, "name", name, 0, 0, configuredTextColor, light);
 					poseStack.popPose();
 				}
 			}
@@ -316,19 +328,19 @@ public class HealthBarRenderer {
 
 				if (NeatConfig.instance.showCurrentHP()) {
 					String hpStr = health_format.format(living.getHealth());
-					mc.font.drawInBatch(hpStr, 2, h, textColor, false, poseStack.last().pose(), buffers, Font.DisplayMode.NORMAL, black, light);
+					submitNeatText(buffers, poseStack, "current_hp", hpStr, 2, h, configuredTextColor, light);
 				}
 				if (NeatConfig.instance.showMaxHP()) {
 					String maxHpStr = ChatFormatting.BOLD + health_format.format(living.getMaxHealth());
-					mc.font.drawInBatch(maxHpStr, (int) (halfSize / healthValueTextScale * 2) - mc.font.width(maxHpStr) - 2, h, textColor, false, poseStack.last().pose(), buffers, Font.DisplayMode.NORMAL, black, light);
+					submitNeatText(buffers, poseStack, "max_hp", maxHpStr, (int) (halfSize / healthValueTextScale * 2) - mc.font.width(maxHpStr) - 2, h, configuredTextColor, light);
 				}
 				if (NeatConfig.instance.showPercentage()) {
 					String percStr = (int) (100 * living.getHealth() / living.getMaxHealth()) + "%";
-					mc.font.drawInBatch(percStr, (int) (halfSize / healthValueTextScale) - mc.font.width(percStr) / 2.0F, h, textColor, false, poseStack.last().pose(), buffers, Font.DisplayMode.NORMAL, black, light);
+					submitNeatText(buffers, poseStack, "percent", percStr, (int) (halfSize / healthValueTextScale) - mc.font.width(percStr) / 2.0F, h, configuredTextColor, light);
 				}
 				if (NeatConfig.instance.enableDebugInfo() && mc.getDebugOverlay().showDebugScreen()) {
 					var id = BuiltInRegistries.ENTITY_TYPE.getKey(living.getType());
-					mc.font.drawInBatch("ID: \"" + id + "\"", 0, h + 16, textColor, false, poseStack.last().pose(), buffers, Font.DisplayMode.NORMAL, black, light);
+					submitNeatText(buffers, poseStack, "debug_id", "ID: \"" + id + "\"", 0, h + 16, configuredTextColor, light);
 				}
 				poseStack.popPose();
 			}
@@ -384,7 +396,7 @@ public class HealthBarRenderer {
 	}
 
 	private static void renderIcon(Level level, ItemStack icon, PoseStack poseStack,
-			MultiBufferSource buffers, float globalScale, float halfSize, float leftShift, float zShift) {
+			SubmitNodeCollector buffers, float globalScale, float halfSize, float leftShift, float zShift) {
 		if (!icon.isEmpty()) {
 			final float iconScale = 0.12F;
 			poseStack.pushPose();
@@ -398,10 +410,58 @@ public class HealthBarRenderer {
 			poseStack.translate(-dx, dy + NeatConfig.instance.iconOffsetY(), dz);
 			poseStack.scale(iconScale, iconScale, iconScale);
 			poseStack.mulPose(Axis.YP.rotationDegrees(180F));
-			Minecraft.getInstance().getItemRenderer()
-					.renderStatic(icon, ItemDisplayContext.NONE, 0xF000F0,
-							OverlayTexture.NO_OVERLAY, poseStack, buffers, level, 0);
+			ItemStackRenderState renderState = new ItemStackRenderState();
+			Minecraft.getInstance().getItemModelResolver()
+					.updateForTopItem(renderState, icon, ItemDisplayContext.NONE, level, null, 0);
+			renderState.submit(poseStack, buffers, 0xF000F0, OverlayTexture.NO_OVERLAY, 0);
 			poseStack.popPose();
 		}
+	}
+
+	private static void submitQuad(SubmitNodeCollector buffers, PoseStack poseStack,
+			float minX, float minY, float maxX, float maxY, float z,
+			int r, int g, int b, int a,
+			float minU, float minV, float maxU, float maxV, int light) {
+		buffers.submitCustomGeometry(poseStack, NeatRenderType.BAR_TEXTURE_TYPE, (pose, builder) -> {
+			addBarVertex(builder, pose, minX, minY, z, r, g, b, a, minU, minV, light);
+			addBarVertex(builder, pose, minX, maxY, z, r, g, b, a, minU, maxV, light);
+			addBarVertex(builder, pose, maxX, maxY, z, r, g, b, a, maxU, maxV, light);
+			addBarVertex(builder, pose, maxX, minY, z, r, g, b, a, maxU, minV, light);
+		});
+	}
+
+	private static void submitNeatText(SubmitNodeCollector buffers, PoseStack poseStack, String label, String text,
+			float x, float y, int configuredColor, int light) {
+		int drawColor = DEBUG_TEXT_COLOR;
+		int backgroundColor = DEBUG_TEXT_BACKGROUND;
+		int drawLight = LightTexture.FULL_BRIGHT;
+		if (textDebugLogs < 40) {
+			LOGGER.info("Neat text submit label={} text='{}' configuredColor=0x{} configuredAlpha={} drawColor=0x{} drawAlpha={} background=0x{} originalLight=0x{} drawLight=0x{} mode=NORMAL shadow=false x={} y={}",
+					label,
+					text,
+					Integer.toHexString(configuredColor),
+					(configuredColor >>> 24) & 0xff,
+					Integer.toHexString(drawColor),
+					(drawColor >>> 24) & 0xff,
+					Integer.toHexString(backgroundColor),
+					Integer.toHexString(light),
+					Integer.toHexString(drawLight),
+					x,
+					y);
+			textDebugLogs++;
+		}
+		buffers.submitText(poseStack, x, y, Component.literal(text).getVisualOrderText(), false, Font.DisplayMode.NORMAL, drawLight, drawColor, backgroundColor, 0);
+	}
+
+	private static void addBarVertex(VertexConsumer builder, PoseStack.Pose pose,
+			float x, float y, float z,
+			int r, int g, int b, int a,
+			float u, float v, int light) {
+		builder.addVertex(pose, x, y, z)
+				.setColor(r, g, b, a)
+				.setUv(u, v)
+				.setOverlay(OverlayTexture.NO_OVERLAY)
+				.setLight(light)
+				.setNormal(pose, 0, 0, 1);
 	}
 }

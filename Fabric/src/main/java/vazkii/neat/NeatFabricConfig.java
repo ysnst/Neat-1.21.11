@@ -19,6 +19,7 @@ public class NeatFabricConfig {
 		NeatConfig.instance = AutoConfig.getConfigHolder(Client.class).getConfig();
 	}
 
+	@SuppressWarnings("removal")
 	public static Supplier<Screen> getConfigScreen(Screen parent) {
 		return AutoConfig.getConfigScreen(Client.class, parent);
 	}

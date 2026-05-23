@@ -18,3 +18,9 @@ minecraft {
 dependencies {
     compileOnly group: 'org.spongepowered', name: 'mixin', version: '0.8.5'
 }
+
+if (!providers.gradleProperty("includeNeoForge").map { it.toBoolean() }.orElse(false).get()) {
+    tasks.configureEach {
+        enabled = false
+    }
+}
